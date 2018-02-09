@@ -1,4 +1,6 @@
-### Snort Intrusion Detection System with Intel Software Guard Extension (Intel SGX)
+#### Snort Intrusion Detection System with Intel Software Guard Extension (Intel SGX)
+
+
 
 This software is a research proof of concept and not intended for production use
 
@@ -52,6 +54,7 @@ Optionally, to set the correct date/time on the system, execute the following co
 The build.sh script will automatically build and configure all necessary components automatically. 
 Make changes in the script as required. The complete build process may take upto 15 minutes
 
+NOTE: provide the absolute path of linux sgx driver when prompted. The path would be <absolute path of install dir>/linux-sgx-driver
 
 ```
 	./build.sh
