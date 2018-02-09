@@ -79,8 +79,3 @@ if [ ! -d graphene ] ; then
     make -C LibOS/shim/test/apps
 fi
 
-# Time to test SGX snort ...Success if you see snort version output
-export LD_LIBRARY_PATH="$LD_LIBRARY_PATH":$(readlink -f graphene/LibOS/shim/test/apps/libdaq/install/lib)
-cd graphene/LibOS/shim/test/apps/snort3 && SGX=1 ./pal_loader snort3.manifest.sgx --version && cd -
-
-

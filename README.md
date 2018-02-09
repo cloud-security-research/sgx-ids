@@ -1,4 +1,4 @@
-#### Snort Intrusion Detection System with Intel Software Guard Extension (Intel SGX)
+# Snort Intrusion Detection System with Intel Software Guard Extension (Intel SGX)
 
 
 
@@ -8,10 +8,10 @@ This software is a research proof of concept and not intended for production use
 Network Function Virtualization (NFV) promises the benefits of reduced infrastructure, personnel, and management costs by outsourcing network middleboxes to the public or private cloud. Unfortunately, running network functions in the cloud entails security challenges, especially for complex stateful services. , SEC-IDS is an research attempt to harden the king of middleboxes - Intrusion Detection Systems (IDS) - using Intel Software Guard Extensions (Intel SGX) technology. SEC-IDS, is an unmodified Snort 3 with a DPDK network layer that achieves line rate throughput. SEC-IDS achieves computational integrity by running all Snort code inside an Intel SGX enclave. At the same time, SEC-IDS achieves near-native performance, with throughput close to 100 percent of vanilla Snort 3, by retaining network I/O outside of the enclave. Our experiments indicate that performance is only constrained by the limited amount of  Enclave physical memory available on current Intel SGX Skylake based E3 Xeon platforms. Finally, we kept the porting effort minimal by using the Graphene-SGX library OS. Only 27 Lines of Code (LoC) were modified in Snort and 178 LoC in Graphene-SGX itself.
 
 
-### How to run build and run SEC-IDS
+## How to run build and run SEC-IDS
 	prerequsites : Intel SGX Enabled server platform with a DPDK compatible 10Gbps network controller
 
-## Prepare the system first
+### Prepare the system first
 
 Install Ubuntu 16.04 x86_64 on a SGX Enabled machine. Ensure Hyperthreading and Power state management is disabled in BIOS
 
@@ -136,14 +136,16 @@ Then build snort and depdendent libaries with graphene SGX support
 
 ```
 
-Time to test SGX snort ...Success if you see snort version output
+--------------------------------------------------------------------------------------------------------------------------
+
+
+### Time to test SGX snort ...Success if you see snort version output
 
 ```
-	export LD_LIBRARY_PATH="$LD_LIBRARY_PATH":$(readlink -f /LibOS/shim/test/apps/libdaq/install/lib)
+	export LD_LIBRARY_PATH="$LD_LIBRARY_PATH":$(readlink -f graphene/LibOS/shim/test/apps/libdaq/install/lib)
 	cd graphene/LibOS/shim/test/apps/snort3 && SGX=1 ./pal_loader snort3.manifest.sgx --version && cd -
 
 ```
---------------------------------------------------------------------------------------------------------------------------
 
 Test helloworld app inside Graphene-SGX to make sure the installation was successful
 
