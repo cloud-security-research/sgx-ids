@@ -2,6 +2,7 @@
 
 
 
+
 This software is a research proof of concept and not intended for production use
 
 Network Function Virtualization (NFV) promises the benefits of reduced infrastructure, personnel, and management costs by outsourcing network middleboxes to the public or private cloud. Unfortunately, running network functions in the cloud entails security challenges, especially for complex stateful services. , SEC-IDS is an research attempt to harden the king of middleboxes - Intrusion Detection Systems (IDS) - using Intel Software Guard Extensions (Intel SGX) technology. SEC-IDS, is an unmodified Snort 3 with a DPDK network layer that achieves line rate throughput. SEC-IDS achieves computational integrity by running all Snort code inside an Intel SGX enclave. At the same time, SEC-IDS achieves near-native performance, with throughput close to 100 percent of vanilla Snort 3, by retaining network I/O outside of the enclave. Our experiments indicate that performance is only constrained by the limited amount of  Enclave physical memory available on current Intel SGX Skylake based E3 Xeon platforms. Finally, we kept the porting effort minimal by using the Graphene-SGX library OS. Only 27 Lines of Code (LoC) were modified in Snort and 178 LoC in Graphene-SGX itself.
@@ -54,7 +55,7 @@ Optionally, to set the correct date/time on the system, execute the following co
 The build.sh script will automatically build and configure all necessary components automatically. 
 Make changes in the script as required. The complete build process may take upto 15 minutes
 
-NOTE: provide the absolute path of linux sgx driver when prompted. The path would be <absolute path of install dir>/linux-sgx-driver
+NOTE: provide the absolute path of linux sgx driver when prompted. That would be absolute path of ./linux-sgx-driver
 
 ```
 	./build.sh
