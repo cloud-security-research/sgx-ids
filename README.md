@@ -49,15 +49,17 @@ Optionally, to set the correct date/time on the system, execute the following co
 ```
 
 
-NOTE !!! The following steps below the line are for reference only. 
+The build.sh script will automatically build and configure all necessary components automatically. 
+Make changes in the script as required. The complete build process may take upto 15 minutes
 
-The build.sh script will perform all steps below. Make changes in the script as required
-
-------------------------------------------------------------------------------------------------------------------------------
 
 ```
 	./build.sh
 ```
+
+NOTE !!! The following steps below the line are for reference only. The ./build.sh script will perform all steps below
+
+------------------------------------------------------------------------------------------------------------------------------
 
 Install linux-sgx-driver
 
@@ -76,16 +78,15 @@ Install linux-sgx-driver
 Install Linux SGX SDK
 
 ```
-	cd ~/01org
 	git clone https://github.com/01org/linux-sgx.git && cd linux-sgx
 	./download_prebuilt.sh   # the following commands are from linux-sgx README
 	make
 	make sdk_install_pkg
 	make psw_install_pkg
-	cd ~/01org/linux-sgx/linux/installer/bin && sudo ./sgx_linux_x64_sdk_${version}.bin  # Choose "/opt/intel" as installdir 
-	cd ~/01org/linux-sgx/linux/installer/bin && sudo ./sgx_linux_x64_psw_${version}.bin 
+	cd linux/installer/bin && sudo ./sgx_linux_x64_psw_${version}.bin 
+	cd linux/installer/bin && sudo ./sgx_linux_x64_sdk_${version}.bin  # Choose "/opt/intel" as installdir 
 	sudo service aesmd start
-	cd ~/01org/linux-sgx/SampleCode/LocalAttestation && make &&  ./app  # simple test that SGX SDK works
+	cd /opt/intel/sgxsdk/SampleCode/LocalAttestation && make &&  ./app  # simple test that SGX SDK works
 ```
 
 
