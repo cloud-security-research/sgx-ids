@@ -33,7 +33,7 @@ Add the following line in /etc/security/limits.conf to permanently change availa
 
 Reboot the machine!
 
-Once the machine comes up execute the following commands. Note: These commands need to executed on every boot
+Once the machine comes up execute the following commands. Note: These commands need to be executed on every boot
 
 ```
 	mkdir /mnt/huge
