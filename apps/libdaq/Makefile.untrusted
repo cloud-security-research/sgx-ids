@@ -1,0 +1,20 @@
+SRCDIR = daq-2.2.1
+
+dpdkflags = --with-dpdk-includes=$(RTE_SDK)/x86_64-native-linuxapp-gcc/include --with-dpdk-libraries=$(RTE_SDK)/x86_64-native-linuxapp-gcc/lib
+confflags = CFLAGS="-fPIC -O3 -g" --prefix=$(abspath .)/install_untrusted $(dpdkflags)
+
+dummy:
+	rm -rf $(SRCDIR) daq_dpdk_multiqueue
+	git clone https://github.com/napatech/daq_dpdk_multiqueue.git
+	git --git-dir=daq_dpdk_multiqueue/.git --work-tree=daq_dpdk_multiqueue/ reset --hard 7c40e02b2b98e6b0974daf13935b1bd71172b2b1
+	mv daq_dpdk_multiqueue/$(SRCDIR) . && rm -rf daq_dpdk_multiqueue
+	cd $(SRCDIR) && patch -p1 < ../daq-2.2.1_graphene_dpdk.patch && ./configure $(confflags)
+	cd $(SRCDIR) && make install
+	cd $(SRCDIR) && make distclean
+	touch dummy
+
+distclean: 
+	cd $(SRCDIR) && make distclean || true
+	rm -rf dummy install_untrusted daq-2.2.1/autom4te.cache
+	rm -rf $(SRCDIR)
+

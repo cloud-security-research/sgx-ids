@@ -1,0 +1,473 @@
+diff --git a/graphene-snort/Pal/src/host/Linux-SGX/Makefile b/graphene-snort/Pal/src/host/Linux-SGX/Makefile
+index 7c2a1dd..7433304 100644
+--- a/graphene-snort/Pal/src/host/Linux-SGX/Makefile
++++ b/graphene-snort/Pal/src/host/Linux-SGX/Makefile
+@@ -17,6 +17,12 @@ urts-asm-objs = sgx_entry
+ graphene_lib = ../../.lib/graphene-lib.a
+ headers	= $(wildcard *.h) $(wildcard ../../*.h) $(wildcard ../../../lib/*.h)
+ 
++dpdk_daq_libs = -L../../../../LibOS/shim/test/apps/libdaq/install_untrusted/lib/ \
++				-L$(RTE_SDK)/x86_64-native-linuxapp-gcc/lib \
++				-ldaq -ldaq_static -ldaq_static_modules -lsfbpf \
++				-Wl,--whole-archive -ldpdk -lnuma -Wl,--no-whole-archive \
++				-lm -ldl
++
+ all: $(host_files)
+ 
+ ifeq ($(DEBUG),1)
+@@ -58,7 +64,7 @@ $(addsuffix .o,$(urts-asm-objs)): %.o: %.S $(headers)
+ 
+ pal-sgx: $(addsuffix .o,$(urts-objs) $(urts-asm-objs)) $(graphene_lib)
+ 	@echo [ host/Linux-SGX/$@ ]
+-	@$(CC) $(CFLAGS) -pie $^ -lc -pthread -o $@
++	@$(CC) $(CFLAGS) -pie $^ -lc -pthread $(dpdk_daq_libs) -o $@
+ 
+ debugger/sgx_gdb.so: debugger/sgx_gdb.c debugger/sgx_gdb.h sgx_arch.h
+ 	@echo [ host/Linux-SGX/$@ ]
+diff --git a/graphene-snort/Pal/src/host/Linux-SGX/db_main.c b/graphene-snort/Pal/src/host/Linux-SGX/db_main.c
+index f282a9b..36b007f 100644
+--- a/graphene-snort/Pal/src/host/Linux-SGX/db_main.c
++++ b/graphene-snort/Pal/src/host/Linux-SGX/db_main.c
+@@ -120,6 +120,40 @@ static int loader_filter (const char * key, int len)
+     return 1;
+ }
+ 
++/*
++ * Dmitrii Kuvaiskii: trusted clock thread
++ *
++ * Emulates rdtsc by infinitely incrementing global variable; consumer of this
++ * variable (e.g., ocall_gettime) must scale it to desired units of time.
++ *
++ * Rationale: rdtsc cannot be used inside SGX enclave, thus Graphene-SGX resorts
++ *            to exiting the enclave, executing clock_gettime(), and resuming
++ *            enclave execution again. For apps like Snort which ask for time
++ *            very often (e.g., on each network packet), this leads to huge
++ *            performance overhead.
++ *
++ * Note: if this thread is preempted, clock will show wrong time.
++ */
++volatile long unsigned trusted_clock;
++
++static int clock_thread_main(void* dummy) {
++    trusted_clock = 0;
++
++    asm volatile (
++            "mov %0, %%rcx\n\t"
++            "mov (%%rcx), %%rax\n\t"
++            "1: inc %%rax\n\t"
++            "   mov %%rax, (%%rcx)\n\t"
++            "   jmp 1b"
++            : /* no output operands */
++            : "r"(&trusted_clock)
++            : "%rax", "%rcx", "cc"
++            );
++
++    /* unreachable */
++    return 0;
++}
++
+ void pal_linux_main(const char ** arguments, const char ** environments,
+                     struct pal_sec * sec_info)
+ {
+@@ -210,6 +244,10 @@ void pal_linux_main(const char ** arguments, const char ** environments,
+         pal_enclave.enclave_base + GET_ENCLAVE_TLS(tcs_offset);
+     SET_ENCLAVE_TLS(thread, (__pal_control.first_thread = first_thread));
+ 
++    /* Dmitrii Kuvaiskii: create trusted-clock thread */
++    PAL_HANDLE clock_thread;
++    _DkThreadCreate(&clock_thread, clock_thread_main, NULL, 0);
++
+     /* call main function */
+     pal_main(pal_sec.instance_id, manifest, exec,
+              pal_sec.exec_addr, parent, first_thread,
+diff --git a/graphene-snort/Pal/src/host/Linux-SGX/enclave_ocalls.c b/graphene-snort/Pal/src/host/Linux-SGX/enclave_ocalls.c
+index 7264005..fbb2bf8 100644
+--- a/graphene-snort/Pal/src/host/Linux-SGX/enclave_ocalls.c
++++ b/graphene-snort/Pal/src/host/Linux-SGX/enclave_ocalls.c
+@@ -64,6 +64,8 @@ int printf(const char * fmt, ...);
+         } _ret;                                             \
+     })
+ 
++/* Linux syscalls */
++
+ int ocall_exit(void)
+ {
+     /* mask exit target so that subsequent enclave entry
+@@ -690,6 +692,7 @@ int ocall_sock_shutdown (int sockfd, int how)
+ 
+ int ocall_gettime (unsigned long * microsec)
+ {
++#if 0
+     int retval = 0;
+     ms_ocall_gettime_t * ms;
+     OCALLOC(ms, ms_ocall_gettime_t *, sizeof(*ms));
+@@ -699,6 +702,17 @@ int ocall_gettime (unsigned long * microsec)
+         *microsec = ms->ms_microsec;
+     OCALL_EXIT();
+     return retval;
++#else
++    /* NOTE: this number is for my particular Xeon CPU E3-1270 v5 @ 3.60GHz */
++    #define CPUFREQ 3785.0
++
++    /* Dmitrii Kuvaiskii: instead of exiting enclave, read from global var;
++     *                    see also db_main.c:clock_thread_main()
++     */
++    extern volatile long unsigned trusted_clock;
++    *microsec = (long unsigned) (trusted_clock/CPUFREQ);
++    return 0;
++#endif
+ }
+ 
+ int ocall_sleep (unsigned long * microsec)
+@@ -778,3 +792,93 @@ int ocall_load_debug(const char * command)
+     OCALL_EXIT();
+     return retval;
+ }
++
++/* DPDK ocalls */
++
++int ocall_dpdk_initialize(char* config_name, int config_snaplen, unsigned int config_timeout, uint32_t config_flags, int config_mode,
++       char* dpdk_args, int debug, int dpdk_queues, void** ctxt_ptr, char* errbuf, size_t errlen)
++{
++    int retval = 0;
++	int len_config_name = config_name ? strlen(config_name) + 1 : 0;
++	int len_dpdk_args = dpdk_args ? strlen(dpdk_args) + 1 : 0;
++	int len_ctxt_ptr = sizeof(*ctxt_ptr);
++	int len_errbuf = errlen;
++
++	ms_ocall_dpdk_initialize_t* ms;
++    OCALLOC(ms, ms_ocall_dpdk_initialize_t*, sizeof(*ms));
++
++    ms->ms_config_name = COPY_TO_USER(config_name, len_config_name);
++	ms->ms_config_snaplen = config_snaplen;
++	ms->ms_config_timeout = config_timeout;
++	ms->ms_config_flags = config_flags;
++	ms->ms_config_mode = config_mode;
++    ms->ms_dpdk_args = COPY_TO_USER(dpdk_args, len_dpdk_args);
++	ms->ms_debug = debug;
++	ms->ms_dpdk_queues = dpdk_queues;
++    ms->ms_ctxt_ptr = COPY_TO_USER(ctxt_ptr, len_ctxt_ptr);
++    ms->ms_errbuf = COPY_TO_USER(errbuf, len_errbuf);
++	ms->ms_errlen = errlen;
++
++    retval = SGX_OCALL(OCALL_DPDK_INITIALIZE, ms);
++    COPY_FROM_USER(ctxt_ptr, ms->ms_ctxt_ptr, len_ctxt_ptr);
++    COPY_FROM_USER(errbuf, ms->ms_errbuf, len_errbuf);
++    OCALL_EXIT();
++    return retval;
++}
++
++int ocall_dpdk_start_device(void* handle, void* dev)
++{
++    int retval = 0;
++
++	ms_ocall_dpdk_start_device_t* ms;
++    OCALLOC(ms, ms_ocall_dpdk_start_device_t*, sizeof(*ms));
++
++	ms->ms_handle = handle;
++	ms->ms_dev = dev;
++
++    retval = SGX_OCALL(OCALL_DPDK_START_DEVICE, ms);
++    OCALL_EXIT();
++    return retval;
++}
++
++int ocall_dpdk_acquire(void* handle)
++{
++    int retval = 0;
++
++	ms_ocall_dpdk_acquire_t* ms;
++    OCALLOC(ms, ms_ocall_dpdk_acquire_t*, sizeof(*ms));
++
++	ms->ms_handle = handle;
++
++    retval = SGX_OCALL(OCALL_DPDK_ACQUIRE, ms);
++    OCALL_EXIT();
++    return retval;
++}
++
++int ocall_dpdk_stop(void* handle)
++{
++    int retval = 0;
++
++	ms_ocall_dpdk_stop_t* ms;
++    OCALLOC(ms, ms_ocall_dpdk_stop_t*, sizeof(*ms));
++
++	ms->ms_handle = handle;
++
++    retval = SGX_OCALL(OCALL_DPDK_STOP, ms);
++    OCALL_EXIT();
++    return retval;
++}
++
++int ocall_dpdk_shutdown(void* handle)
++{
++    int retval = 0;
++
++	ms_ocall_dpdk_shutdown_t* ms = NULL;
++    OCALLOC(ms, ms_ocall_dpdk_shutdown_t*, sizeof(*ms));
++
++	ms->ms_handle = handle;
++
++    retval = SGX_OCALL(OCALL_DPDK_SHUTDOWN, ms);
++    OCALL_EXIT();
++    return retval;
++}
+diff --git a/graphene-snort/Pal/src/host/Linux-SGX/enclave_ocalls.h b/graphene-snort/Pal/src/host/Linux-SGX/enclave_ocalls.h
+index 7baa7f0..b9b7d08 100644
+--- a/graphene-snort/Pal/src/host/Linux-SGX/enclave_ocalls.h
++++ b/graphene-snort/Pal/src/host/Linux-SGX/enclave_ocalls.h
+@@ -11,6 +11,7 @@
+ #include <linux/socket.h>
+ #include <linux/poll.h>
+ 
++/* Linux syscalls */
+ int ocall_exit (void);
+ 
+ int ocall_print_string (const char * str, unsigned int length);
+@@ -103,3 +104,15 @@ int ocall_rename (const char * oldpath, const char * newpath);
+ int ocall_delete (const char * pathname);
+ 
+ int ocall_load_debug (const char * command);
++
++/* DPDK ocalls */
++int  ocall_dpdk_initialize (char * config_name, int config_snaplen, unsigned config_timeout, uint32_t config_flags, int config_mode,
++        char * dpdk_args, int debug, int dpdk_queues, void ** ctxt_ptr, char * errbuf, size_t errlen);
++
++int  ocall_dpdk_start_device (void * handle, void * dev);
++
++int  ocall_dpdk_acquire (void * handle);
++
++int  ocall_dpdk_stop (void * handle);
++
++int ocall_dpdk_shutdown (void * handle);
+diff --git a/graphene-snort/Pal/src/host/Linux-SGX/ocall_types.h b/graphene-snort/Pal/src/host/Linux-SGX/ocall_types.h
+index 40d85a0..722d2fe 100644
+--- a/graphene-snort/Pal/src/host/Linux-SGX/ocall_types.h
++++ b/graphene-snort/Pal/src/host/Linux-SGX/ocall_types.h
+@@ -8,6 +8,7 @@
+ #include "linux_types.h"
+ 
+ enum {
++    /* Linux syscalls */
+     OCALL_EXIT = 0,
+     OCALL_PRINT_STRING,
+     OCALL_ALLOC_UNTRUSTED,
+@@ -45,6 +46,13 @@ enum {
+     OCALL_RENAME,
+     OCALL_DELETE,
+     OCALL_LOAD_DEBUG,
++    /* DPDK ocalls */
++    OCALL_DPDK_INITIALIZE,
++    OCALL_DPDK_START_DEVICE,
++    OCALL_DPDK_ACQUIRE,
++    OCALL_DPDK_STOP,
++    OCALL_DPDK_SHUTDOWN,
++    /* sentinel */
+     OCALL_NR,
+ };
+ 
+@@ -256,3 +264,34 @@ typedef struct {
+ typedef struct {
+     unsigned int ms_tid;
+ } ms_ocall_schedule_t;
++
++typedef struct {
++	char* ms_config_name;
++	int ms_config_snaplen;
++	unsigned int ms_config_timeout;
++	uint32_t ms_config_flags;
++	int ms_config_mode;
++	char* ms_dpdk_args;
++	int ms_debug;
++	int ms_dpdk_queues;
++	void** ms_ctxt_ptr;
++	char* ms_errbuf;
++	size_t ms_errlen;
++} ms_ocall_dpdk_initialize_t;
++
++typedef struct {
++	void* ms_handle;
++	void* ms_dev;
++} ms_ocall_dpdk_start_device_t;
++
++typedef struct {
++	void* ms_handle;
++} ms_ocall_dpdk_acquire_t;
++
++typedef struct {
++	void* ms_handle;
++} ms_ocall_dpdk_stop_t;
++
++typedef struct {
++	void* ms_handle;
++} ms_ocall_dpdk_shutdown_t;
+diff --git a/graphene-snort/Pal/src/host/Linux-SGX/pal.map b/graphene-snort/Pal/src/host/Linux-SGX/pal.map
+index 1cca6f4..50156ff 100644
+--- a/graphene-snort/Pal/src/host/Linux-SGX/pal.map
++++ b/graphene-snort/Pal/src/host/Linux-SGX/pal.map
+@@ -49,5 +49,8 @@ PAL {
+         # Control block
+         pal_control; pal_control_addr;
+ 
++        # DPDK ocalls
++        ocall_dpdk_start_device; ocall_dpdk_initialize; ocall_dpdk_shutdown; ocall_dpdk_stop; ocall_dpdk_acquire;
++
+     local: *;
+ };
+diff --git a/graphene-snort/Pal/src/host/Linux-SGX/sgx_enclave.c b/graphene-snort/Pal/src/host/Linux-SGX/sgx_enclave.c
+index 7ae4da1..2fef6e6 100644
+--- a/graphene-snort/Pal/src/host/Linux-SGX/sgx_enclave.c
++++ b/graphene-snort/Pal/src/host/Linux-SGX/sgx_enclave.c
+@@ -22,6 +22,8 @@
+ 
+ #define ODEBUG(code, ms) do {} while (0)
+ 
++/* linux syscalls */
++
+ static int sgx_ocall_exit(void * pms)
+ {
+     ODEBUG(OCALL_EXIT, NULL);
+@@ -32,7 +34,12 @@ static int sgx_ocall_exit(void * pms)
+              will not be able to re-use TCS and "Cannot attach to TCS" error
+              pops us (correct fix would be to notify parent here after unmap
+              but this requires substantial refactoring of DrawBridge...) */
+-    unmap_tcs();
++    int num_enclave_threads = unmap_tcs();
++    if (num_enclave_threads <= 1) {
++        /* killall if no threads or only trusted_clock thread */
++        INLINE_SYSCALL(exit_group, 1, 0);
++        return 0;
++    }
+ 
+     INLINE_SYSCALL(exit, 1, 0);
+     return 0;
+@@ -661,7 +668,61 @@ static int sgx_ocall_load_debug(void * pms)
+     return 0;
+ }
+ 
++/* DPDK ocalls */
++int dpdk_initialize(char* config_name, int config_snaplen, unsigned config_timeout, uint32_t config_flags, int config_mode,
++                char* dpdk_args, int debug, int dpdk_queues, void** ctxt_ptr, char* errbuf, size_t errlen);
++int dpdk_start_device(void *handle, void *dev);
++int dpdk_acquire(void* handle);
++int dpdk_stop(void *handle);
++void dpdk_shutdown(void *handle);
++
++static int sgx_ocall_dpdk_initialize(void * pms)
++{
++    ms_ocall_dpdk_initialize_t * ms = (ms_ocall_dpdk_initialize_t *) pms;
++    int ret;
++    ODEBUG(OCALL_DPDK_INITIALIZE, ms);
++    ret = dpdk_initialize(ms->ms_config_name, ms->ms_config_snaplen, ms->ms_config_timeout, ms->ms_config_flags, ms->ms_config_mode,
++            ms->ms_dpdk_args, ms->ms_debug, ms->ms_dpdk_queues, ms->ms_ctxt_ptr, ms->ms_errbuf, ms->ms_errlen);
++    return ret;
++}
++
++static int sgx_ocall_dpdk_start_device(void * pms)
++{
++    ms_ocall_dpdk_start_device_t * ms = (ms_ocall_dpdk_start_device_t *) pms;
++    int ret;
++    ODEBUG(OCALL_DPDK_START_DEVICE, ms);
++    ret = dpdk_start_device(ms->ms_handle, ms->ms_dev);
++    return ret;
++}
++
++static int sgx_ocall_dpdk_acquire(void * pms)
++{
++    ms_ocall_dpdk_acquire_t * ms = (ms_ocall_dpdk_acquire_t *) pms;
++    int ret;
++    ODEBUG(OCALL_DPDK_ACQUIRE, ms);
++    ret = dpdk_acquire(ms->ms_handle);
++    return ret;
++}
++
++static int sgx_ocall_dpdk_stop(void * pms)
++{
++    ms_ocall_dpdk_stop_t * ms = (ms_ocall_dpdk_stop_t *) pms;
++    int ret;
++    ODEBUG(OCALL_DPDK_STOP, ms);
++    ret = dpdk_stop(ms->ms_handle);
++    return ret;
++}
++
++static int sgx_ocall_dpdk_shutdown(void * pms)
++{
++    ms_ocall_dpdk_shutdown_t * ms = (ms_ocall_dpdk_shutdown_t *) pms;
++    ODEBUG(OCALL_DPDK_SHUTDOWN, ms);
++    dpdk_shutdown(ms->ms_handle);
++    return 0;
++}
++
+ void * ocall_table[OCALL_NR] = {
++        /* linux syscalls */
+         [OCALL_EXIT]            = (void *) sgx_ocall_exit,
+         [OCALL_PRINT_STRING]    = (void *) sgx_ocall_print_string,
+         [OCALL_ALLOC_UNTRUSTED] = (void *) sgx_ocall_alloc_untrusted,
+@@ -699,6 +760,12 @@ void * ocall_table[OCALL_NR] = {
+         [OCALL_RENAME]          = (void *) sgx_ocall_rename,
+         [OCALL_DELETE]          = (void *) sgx_ocall_delete,
+         [OCALL_LOAD_DEBUG]      = (void *) sgx_ocall_load_debug,
++        /* DPDK ocalls */
++        [OCALL_DPDK_INITIALIZE]   = (void *) sgx_ocall_dpdk_initialize,
++        [OCALL_DPDK_START_DEVICE] = (void *) sgx_ocall_dpdk_start_device,
++        [OCALL_DPDK_ACQUIRE]      = (void *) sgx_ocall_dpdk_acquire,
++        [OCALL_DPDK_STOP]         = (void *) sgx_ocall_dpdk_stop,
++        [OCALL_DPDK_SHUTDOWN]     = (void *) sgx_ocall_dpdk_shutdown,
+     };
+ 
+ #define EDEBUG(code, ms) do {} while (0)
+diff --git a/graphene-snort/Pal/src/host/Linux-SGX/sgx_internal.h b/graphene-snort/Pal/src/host/Linux-SGX/sgx_internal.h
+index 96361a3..b7ff036 100644
+--- a/graphene-snort/Pal/src/host/Linux-SGX/sgx_internal.h
++++ b/graphene-snort/Pal/src/host/Linux-SGX/sgx_internal.h
+@@ -121,7 +121,7 @@ int clone_thread (void);
+ 
+ void create_tcs_mapper (void * tcs_base, unsigned int thread_num);
+ void map_tcs (unsigned int tid);
+-void unmap_tcs (void);
++int unmap_tcs (void);
+ 
+ extern __thread struct pal_enclave * current_enclave;
+ 
+diff --git a/graphene-snort/Pal/src/host/Linux-SGX/sgx_thread.c b/graphene-snort/Pal/src/host/Linux-SGX/sgx_thread.c
+index 722de34..db4765e 100644
+--- a/graphene-snort/Pal/src/host/Linux-SGX/sgx_thread.c
++++ b/graphene-snort/Pal/src/host/Linux-SGX/sgx_thread.c
+@@ -48,15 +48,34 @@ void map_tcs (unsigned int tid)
+         }
+ }
+ 
+-void unmap_tcs (void)
++/* TODO: do normal spinlocks */
++static volatile int exclusion = 0;
++static void lock() {
++    while (__sync_lock_test_and_set(&exclusion, 1)) {}
++}
++static void unlock() {
++    __sync_synchronize();
++    exclusion = 0;
++}
++
++int unmap_tcs (void)
+ {
+     int index = current_tcs - enclave_tcs;
+     struct thread_map * map = &enclave_thread_map[index];
+     if (index >= enclave_thread_num)
+-        return;
++        return 0;
+     current_tcs = NULL;
+     ((struct enclave_dbginfo *) DBGINFO_ADDR)->thread_tids[index] = 0;
+     map->tid = 0;
++
++    /* Dmitrii Kuvaiskii: return number of live enclave threads */
++    lock();
++    int res = 0;
++    for (int i = 0 ; i < enclave_thread_num ; i++)
++        if (enclave_thread_map[i].tid)
++            res++;
++    unlock();
++    return res;
+ }
+ 
+ static void * thread_start (void * arg)

@@ -1,0 +1,7 @@
+
+* For packets more than 1500B in size we need to increase MTU, but DPDK has weird problems
+
+* To have more than 10000 flows, we need to modify PktGen's source code, see http://www.dpdk.org/ml/archives/users/2017-May/001850.html
+    * in app/pktgen-constants.h, should change `MAX_MBUFS_PER_PORT      = (DEFAULT_TX_DESC * 8)` to `MAX_MBUFS_PER_PORT      = (DEFAULT_TX_DESC * 48)`
+    * values more than 48 do not work on my machine due to some memory limits
+    * value of 48 gives maximum of 32K flows

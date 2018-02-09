@@ -1,0 +1,108 @@
+#!$(PAL)
+
+loader.preload = file:$(SHIMPATH)
+loader.exec = file:snort
+
+loader.env.LD_LIBRARY_PATH = install/deps:/lib:/usr/lib:/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu
+loader.env.LUA_PATH = install/include/snort/lua/?.lua;
+loader.env.SNORT_LUA_PATH = install/etc/snort/
+
+loader.debug_type = none
+
+fs.mount.lib.type = chroot
+fs.mount.lib.path = /lib
+fs.mount.lib.uri = file:$(LIBCDIR)
+
+fs.mount.cwd.type = chroot
+fs.mount.cwd.path = $(PWD)
+fs.mount.cwd.uri = file:
+
+fs.mount.usr.type = chroot
+fs.mount.usr.path = /usr
+fs.mount.usr.uri = file:/usr
+
+fs.mount.lib2.type = chroot
+fs.mount.lib2.path = /lib/x86_64-linux-gnu
+fs.mount.lib2.uri = file:/lib/x86_64-linux-gnu
+
+sys.stack.size = 1m
+sys.brk.size = 64M
+glibc.heap_size = 16M
+
+sgx.enclave_size=2G
+sgx.thread_num=8
+
+### libc and libstdc++ libraries
+sgx.trusted_files.ld = file:$(LIBCDIR)/ld-linux-x86-64.so.2
+sgx.trusted_files.libc = file:$(LIBCDIR)/libc.so.6
+sgx.trusted_files.libm = file:$(LIBCDIR)/libm.so.6
+sgx.trusted_files.libdl = file:$(LIBCDIR)/libdl.so.2
+sgx.trusted_files.libpthread = file:$(LIBCDIR)/libpthread.so.0
+sgx.trusted_files.libgcc = file:/lib/x86_64-linux-gnu/libgcc_s.so.1
+sgx.trusted_files.libcpp = file:/usr/lib/x86_64-linux-gnu/libstdc++.so.6
+sgx.trusted_files.liblzma = file:/lib/x86_64-linux-gnu/liblzma.so.5
+
+### NIS libraries
+sgx.trusted_files.libnssfiles = file:/lib/x86_64-linux-gnu/libnss_files.so.2
+sgx.trusted_files.libnssnis = file:/lib/x86_64-linux-gnu/libnss_nis.so.2
+sgx.trusted_files.libnsl = file:/lib/x86_64-linux-gnu/libnsl.so.1
+
+# dependencies of Snort
+# sgx.trusted_files.libdaq = file:install/deps/libdaq.so.4
+sgx.trusted_files.libsfbpf = file:install/deps/libsfbpf.so.0
+sgx.trusted_files.libdnet = file:install/deps/libdnet.so.1
+sgx.trusted_files.libpcap = file:install/deps/libpcap.so.0.8
+sgx.trusted_files.luajit = file:install/deps/libluajit-5.1.so.2
+sgx.trusted_files.libcrypto = file:install/deps/libcrypto.so.1.1
+sgx.trusted_files.libpcre = file:install/deps/libpcre.so.1
+sgx.trusted_files.libz = file:install/deps/libz.so.1
+sgx.trusted_files.libnuma = file:install/deps/libnuma.so.1
+sgx.trusted_files.libdaqdpdk = file:install/deps/libdaqdpdk.so.1
+
+# C++ plugins of Snort
+sgx.trusted_files.plugincxx1  = file:install/lib/snort_extra/inspectors/data_log.so
+sgx.trusted_files.plugincxx2  = file:install/lib/snort_extra/inspectors/dpx.so
+sgx.trusted_files.plugincxx3  = file:install/lib/snort_extra/daqs/daq_socket.so
+sgx.trusted_files.plugincxx4  = file:install/lib/snort_extra/daqs/daq_regtest.so
+sgx.trusted_files.plugincxx5  = file:install/lib/snort_extra/codecs/cd_wlan.so
+sgx.trusted_files.plugincxx6  = file:install/lib/snort_extra/codecs/cd_ppp.so
+sgx.trusted_files.plugincxx7  = file:install/lib/snort_extra/codecs/cd_null.so
+sgx.trusted_files.plugincxx8  = file:install/lib/snort_extra/codecs/cd_linux_sll.so
+sgx.trusted_files.plugincxx9  = file:install/lib/snort_extra/codecs/cd_slip.so
+sgx.trusted_files.plugincxx10 = file:install/lib/snort_extra/codecs/cd_token_ring.so
+sgx.trusted_files.plugincxx11 = file:install/lib/snort_extra/codecs/cd_pflog.so
+sgx.trusted_files.plugincxx12 = file:install/lib/snort_extra/codecs/cd_raw4.so
+sgx.trusted_files.plugincxx13 = file:install/lib/snort_extra/codecs/cd_pim.so
+sgx.trusted_files.plugincxx14 = file:install/lib/snort_extra/codecs/cd_raw6.so
+sgx.trusted_files.plugincxx15 = file:install/lib/snort_extra/codecs/cd_eapol.so
+sgx.trusted_files.plugincxx16 = file:install/lib/snort_extra/so_rules/sid_18758.so
+sgx.trusted_files.plugincxx17 = file:install/lib/snort_extra/search_engines/lowmem.so
+sgx.trusted_files.plugincxx18 = file:install/lib/snort_extra/ips_options/ips_urg.so
+sgx.trusted_files.plugincxx19 = file:install/lib/snort_extra/ips_options/ips_pkt_num.so
+sgx.trusted_files.plugincxx20 = file:install/lib/snort_extra/loggers/alert_unixsock.so
+sgx.trusted_files.plugincxx21 = file:install/lib/snort_extra/loggers/log_null.so
+sgx.trusted_files.plugincxx22 = file:install/lib/snort_extra/loggers/alert_ex.so
+
+# config files + rules for Snort
+sgx.allowed_files.lua1 = file:install/etc/snort/snort.lua
+sgx.allowed_files.lua2 = file:install/etc/snort/snort_defaults.lua
+sgx.allowed_files.lua3 = file:install/etc/snort/file_magic.lua
+sgx.allowed_files.rules  = file:install/etc/snort/sample.rules
+sgx.allowed_files.rules2 = file:install/etc/snort/community.rules
+sgx.allowed_files.rules3 = file:install/etc/snort/community_1.rules
+sgx.allowed_files.rules4 = file:install/etc/snort/community_10.rules
+sgx.allowed_files.rules5 = file:install/etc/snort/community_100.rules
+sgx.allowed_files.rules6 = file:install/etc/snort/community_1000.rules
+sgx.allowed_files.rules7 = file:install/etc/snort/community_3462.rules
+
+sgx.allowed_files.configlua = file:install/include/snort/lua/snort_config.lua
+sgx.allowed_files.pluginlua = file:install/include/snort/lua/snort_plugin.lua
+
+# Lua plugins of Snort
+sgx.allowed_files.pluginlua1 = file:install/lib/snort_extra/ips_options/find.lua
+sgx.allowed_files.pluginlua2 = file:install/lib/snort_extra/loggers/alert.lua
+
+# PCAP inputs for Snort
+sgx.allowed_files.input1 = file:pcaps/test.pcap
+sgx.allowed_files.input2 = file:pcaps/smallFlows.pcap
+sgx.allowed_files.input3 = file:pcaps/bigFlows.pcap

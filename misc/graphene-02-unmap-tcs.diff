@@ -1,0 +1,254 @@
+diff --git a/graphene-snort/LibOS/shim/test/apps/test-threadexit/Makefile b/graphene-snort/LibOS/shim/test/apps/test-threadexit/Makefile
+new file mode 100644
+index 0000000..98ee02d
+--- /dev/null
++++ b/graphene-snort/LibOS/shim/test/apps/test-threadexit/Makefile
+@@ -0,0 +1,15 @@
++target = testthreadexit
++exec_target = testthreadexit.manifest
++
++clean-extra += clean-tmp
++
++level = ../../
++include ../../Makefile
++
++$(target): %: %.c
++	@echo [ $@ ]
++	@$(CC) $(CFLAGS) -pthread -o $@ $< \
++	$(shell echo $@ | sed 's/^[^\.]*//g' | sed 's/\./ -l/g')
++
++clean-tmp:
++	rm -f $(target).manifest.sgx
+diff --git a/graphene-snort/LibOS/shim/test/apps/test-threadexit/testthreadexit.c b/graphene-snort/LibOS/shim/test/apps/test-threadexit/testthreadexit.c
+new file mode 100644
+index 0000000..cd8e814
+--- /dev/null
++++ b/graphene-snort/LibOS/shim/test/apps/test-threadexit/testthreadexit.c
+@@ -0,0 +1,44 @@
++#include <unistd.h>
++#include <sys/types.h>
++#include <errno.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <pthread.h>
++#include <string.h>
++
++void *print_message_function ( void *ptr ) {
++    int* thread_no = (int*) ptr;
++    printf("   thread %d started \n", *thread_no);
++    fflush(stdout);
++    sleep(1);
++    printf("   thread %d finished \n", *thread_no);
++    fflush(stdout);
++    pthread_exit(0);
++//    return NULL;
++}
++
++/* there will be two simultaneous threads at each point in time and
++   NUMTHREADS+1 threads through the execution of program (including)
++   the main thread waiting for child threads */
++int main(int argc, char** argv) {
++    if (argc != 2) {
++        printf("usage: %s <number-of-threads>\n", argv[0]);
++        exit(0);
++    }
++
++    int NUMTHREADS = atoi(argv[1]);
++    printf("main thread prepares to start %d threads\n", NUMTHREADS);
++    fflush(stdout);
++
++    pthread_t thread1;
++    int thread_no;
++    for (thread_no=0; thread_no<NUMTHREADS; thread_no++) {
++        pthread_create(&thread1, NULL, (void *) &print_message_function, (void *) &thread_no);
++        pthread_join(thread1, NULL);
++    }
++
++    printf("main thread exits\n");
++    fflush(stdout);
++
++    exit(0);
++}
+diff --git a/graphene-snort/LibOS/shim/test/apps/test-threadexit/testthreadexit.manifest.template b/graphene-snort/LibOS/shim/test/apps/test-threadexit/testthreadexit.manifest.template
+new file mode 100644
+index 0000000..3da5340
+--- /dev/null
++++ b/graphene-snort/LibOS/shim/test/apps/test-threadexit/testthreadexit.manifest.template
+@@ -0,0 +1,30 @@
++#!$(PAL)
++
++loader.preload = file:$(SHIMPATH)
++loader.exec = file:testthreadexit
++loader.env.LD_LIBRARY_PATH = /lib:/usr/lib:/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu
++loader.debug_type = none
++loader.syscall_symbol = syscalldb
++
++fs.mount.lib.type = chroot
++fs.mount.lib.path = /lib
++fs.mount.lib.uri = file:$(LIBCDIR)
++
++fs.mount.lib2.type = chroot
++fs.mount.lib2.path = /lib/x86_64-linux-gnu
++fs.mount.lib2.uri = file:/lib/x86_64-linux-gnu
++
++sys.stack.size = 1m
++sys.brk.size = 64M
++glibc.heap_size = 16M
++
++# note that Graphene-SGX reserves one thread for its own purposes
++sgx.thread_num = 4
++
++sgx.trusted_files.ld = file:$(LIBCDIR)/ld-linux-x86-64.so.2
++sgx.trusted_files.libc = file:$(LIBCDIR)/libc.so.6
++sgx.trusted_files.libdl = file:$(LIBCDIR)/libdl.so.2
++sgx.trusted_files.libm = file:$(LIBCDIR)/libm.so.6
++sgx.trusted_files.libpthread = file:$(LIBCDIR)/libpthread.so.0
++sgx.trusted_files.libgcc = file:/lib/x86_64-linux-gnu/libgcc_s.so.1
++
+diff --git a/graphene-snort/Pal/src/host/Linux-SGX/enclave_entry.S b/graphene-snort/Pal/src/host/Linux-SGX/enclave_entry.S
+index 0d4b25b..65f036a 100644
+--- a/graphene-snort/Pal/src/host/Linux-SGX/enclave_entry.S
++++ b/graphene-snort/Pal/src/host/Linux-SGX/enclave_entry.S
+@@ -36,7 +36,10 @@ enclave_entry:
+ 	# to deceive the trusted PAL.
+ 
+ 	# A safe design: check if %gs:SGX_EXIT_TARGET is ever assigned
++	# sgx_exit_target_mask is used to avoid returning from exit() syscall
++	# when new thread re-uses destroyed thread's TCS
+ 	mov %gs:SGX_EXIT_TARGET, %rcx
++	and  %gs:SGX_EXIT_TARGET_MASK, %rcx
+ 	cmp $0, %rcx
+ 	jne .Lreturn_from_ocall
+ 
+@@ -47,6 +50,9 @@ enclave_entry:
+ 	# RCX (former RSP) - The unstrusted stack
+ 	# R8  - enclave base
+ 
++	# allow all exit targets
++	movq $-1, %gs:SGX_EXIT_TARGET_MASK
++
+ 	# calculate enclave base = RBX (trusted) - %gs:SGX_TCS_OFFSET
+ 	sub %gs:SGX_TCS_OFFSET, %rbx
+ 	mov %rbx, %r8
+@@ -265,6 +271,9 @@ sgx_ocall:
+ 
+ 	mov %rdi, %rax
+ 
++	# allow all exit targets
++	movq $-1, %gs:SGX_EXIT_TARGET_MASK
++
+ 	# restore FSBASE if necessary
+ 	mov %gs:SGX_FSBASE, %rbx
+ 	cmp $0, %rbx
+diff --git a/graphene-snort/Pal/src/host/Linux-SGX/enclave_ocalls.c b/graphene-snort/Pal/src/host/Linux-SGX/enclave_ocalls.c
+index e24c90b..7264005 100644
+--- a/graphene-snort/Pal/src/host/Linux-SGX/enclave_ocalls.c
++++ b/graphene-snort/Pal/src/host/Linux-SGX/enclave_ocalls.c
+@@ -66,10 +66,12 @@ int printf(const char * fmt, ...);
+ 
+ int ocall_exit(void)
+ {
+-    int retval = 0;
++    /* mask exit target so that subsequent enclave entry
++       on this TCS doesn't proceed to "resume" */
++    SET_ENCLAVE_TLS(exit_target_mask, 0);
+     SGX_OCALL(OCALL_EXIT, NULL);
+     /* never reach here */
+-    return retval;
++    return 0;
+ }
+ 
+ int ocall_print_string (const char * str, unsigned int length)
+diff --git a/graphene-snort/Pal/src/host/Linux-SGX/sgx_enclave.c b/graphene-snort/Pal/src/host/Linux-SGX/sgx_enclave.c
+index 1e6c6c5..7ae4da1 100644
+--- a/graphene-snort/Pal/src/host/Linux-SGX/sgx_enclave.c
++++ b/graphene-snort/Pal/src/host/Linux-SGX/sgx_enclave.c
+@@ -25,6 +25,15 @@
+ static int sgx_ocall_exit(void * pms)
+ {
+     ODEBUG(OCALL_EXIT, NULL);
++
++    /* allow new threads to re-use this TCS
++       TODO: data race possible since parent thread is woken up before
++             we reach this code, in this case a new thread created by parent
++             will not be able to re-use TCS and "Cannot attach to TCS" error
++             pops us (correct fix would be to notify parent here after unmap
++             but this requires substantial refactoring of DrawBridge...) */
++    unmap_tcs();
++
+     INLINE_SYSCALL(exit, 1, 0);
+     return 0;
+ }
+diff --git a/graphene-snort/Pal/src/host/Linux-SGX/sgx_main.c b/graphene-snort/Pal/src/host/Linux-SGX/sgx_main.c
+index 6851390..b6168ae 100644
+--- a/graphene-snort/Pal/src/host/Linux-SGX/sgx_main.c
++++ b/graphene-snort/Pal/src/host/Linux-SGX/sgx_main.c
+@@ -432,6 +432,7 @@ int initialize_enclave (struct pal_enclave * enclave)
+                 gs->gpr = gs->ssa +
+                     enclave->ssaframesize - sizeof(sgx_arch_gpr_t);
+                 enclave_thread_gprs[t] = (unsigned long) gs->gpr;
++                gs->exit_target_mask = -1;  // allow all targets on first entry
+             }
+ 
+             goto add_pages;
+@@ -844,14 +845,7 @@ static int load_enclave (struct pal_enclave * enclave,
+     /* start running trusted PAL */
+     ecall_enclave_start(arguments, environments);
+ 
+-    PAL_NUM exit_time = 0;
+-#if PRINT_ENCLAVE_STAT == 1
+-    INLINE_SYSCALL(gettimeofday, 2, &tv, NULL);
+-    exit_time = tv.tv_sec * 1000000UL + tv.tv_usec;
+-#endif
+-
+-    unmap_tcs();
+-    INLINE_SYSCALL(exit, 0);
++    /* unreachable */
+     return 0;
+ }
+ 
+diff --git a/graphene-snort/Pal/src/host/Linux-SGX/sgx_thread.c b/graphene-snort/Pal/src/host/Linux-SGX/sgx_thread.c
+index e17ae99..722de34 100644
+--- a/graphene-snort/Pal/src/host/Linux-SGX/sgx_thread.c
++++ b/graphene-snort/Pal/src/host/Linux-SGX/sgx_thread.c
+@@ -54,11 +54,9 @@ void unmap_tcs (void)
+     struct thread_map * map = &enclave_thread_map[index];
+     if (index >= enclave_thread_num)
+         return;
+-    SGX_DBG(DBG_I, "unmap TCS at 0x%08lx\n", map->tcs);
+     current_tcs = NULL;
+     ((struct enclave_dbginfo *) DBGINFO_ADDR)->thread_tids[index] = 0;
+     map->tid = 0;
+-    map->tcs = NULL;
+ }
+ 
+ static void * thread_start (void * arg)
+@@ -73,7 +71,7 @@ static void * thread_start (void * arg)
+     }
+ 
+     ecall_thread_start();
+-    unmap_tcs();
++    /* unreachable */
+     return NULL;
+ }
+ 
+diff --git a/graphene-snort/Pal/src/host/Linux-SGX/sgx_tls.h b/graphene-snort/Pal/src/host/Linux-SGX/sgx_tls.h
+index 5f49a71..84b30a8 100644
+--- a/graphene-snort/Pal/src/host/Linux-SGX/sgx_tls.h
++++ b/graphene-snort/Pal/src/host/Linux-SGX/sgx_tls.h
+@@ -19,6 +19,7 @@ struct enclave_tls {
+     void *   ustack_top;
+     void *   ustack;
+     void *   thread;
++    uint64_t exit_target_mask;
+ };
+ 
+ #ifndef DEBUG
+@@ -56,6 +57,7 @@ extern uint64_t dummy_debug_variable;
+ #define SGX_USTACK_TOP              0x48
+ #define SGX_USTACK                  0x50
+ #define SGX_THREAD                  0x58
++#define SGX_EXIT_TARGET_MASK        0x60
+ 
+ #endif
+ 

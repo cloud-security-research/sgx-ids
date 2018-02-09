@@ -1,0 +1,259 @@
+From 4020a8fe7ffb4806754c12ac641f530e15f14b86 Mon Sep 17 00:00:00 2001
+From: Hui Wang <hw.huiwang@huawei.com>
+Date: Thu, 18 May 2017 17:57:26 +0800
+Subject: [PATCH 1/2] adaptive graphene sgx driver to intel's new driver
+
+Intel have changed the interface name of linux sgx driver, this commit
+adaptive the graphene's sgx driver to intel's new driver.
+
+See [commit 45c139](https://github.com/01org/linux-sgx-driver/commit/45c139d4a824091b3923d5677ae8794e9d45abc0) for details.
+
+Signed-off-by: Hui Wang <hw.huiwang@huawei.com>
+---
+ Pal/src/host/Linux-SGX/sgx-driver/Makefile         |  4 +-
+ Pal/src/host/Linux-SGX/sgx-driver/gsgx.h           | 50 +++++++++++-----------
+ Pal/src/host/Linux-SGX/sgx-driver/gsgx_main.c      | 34 +++++++--------
+ Pal/src/host/Linux-SGX/sgx-driver/isgx_ksyms.h     | 12 +++---
+ .../host/Linux-SGX/sgx-driver/link-intel-driver.py |  2 +-
+ 5 files changed, 51 insertions(+), 51 deletions(-)
+
+diff --git a/Pal/src/host/Linux-SGX/sgx-driver/Makefile b/Pal/src/host/Linux-SGX/sgx-driver/Makefile
+index 73081f268..58c4da96d 100644
+--- a/Pal/src/host/Linux-SGX/sgx-driver/Makefile
++++ b/Pal/src/host/Linux-SGX/sgx-driver/Makefile
+@@ -7,10 +7,10 @@ else
+ KDIR := /lib/modules/$(shell uname -r)/build
+ PWD  := $(shell pwd)
+ 
+-default: linux-sgx-driver/isgx.h
++default: linux-sgx-driver/sgx.h
+ 	$(MAKE) -C $(KDIR) SUBDIRS=$(PWD) CFLAGS_MODULE="-DDEBUG -g -O0" modules
+ 
+-linux-sgx-driver/isgx.h:
++linux-sgx-driver/sgx.h:
+ 	@./link-intel-driver.py
+ endif
+ 
+diff --git a/Pal/src/host/Linux-SGX/sgx-driver/gsgx.h b/Pal/src/host/Linux-SGX/sgx-driver/gsgx.h
+index 06aca148b..67a6f0f94 100644
+--- a/Pal/src/host/Linux-SGX/sgx-driver/gsgx.h
++++ b/Pal/src/host/Linux-SGX/sgx-driver/gsgx.h
+@@ -1,25 +1,25 @@
+-/*
+- * (C) Copyright 2013 Intel Corporation
+- * Author: Jarkko Sakkinen <jarkko.sakkinen@intel.com>
+- *
+- * This program is free software; you can redistribute it and/or
+- * modify it under the terms of the GNU General Public License
+- * as published by the Free Software Foundation; version 2
+- * of the License.
+- */
+-
+-#ifndef __ARCH_GSGX_H__
+-#define __ARCH_GSGX_H__
+-
+-#include <isgx.h>
+-#include <isgx_arch.h>
+-#include <isgx_user.h>
+-
+-#include "graphene-sgx.h"
+-#include "isgx_ksyms.h"
+-
+-extern struct vm_operations_struct gsgx_vm_ops;
+-
+-long gsgx_ioctl(struct file *filep, unsigned int cmd, unsigned long arg);
+-
+-#endif /* __ARCH_X86_GSGX_H__ */
++/*
++ * (C) Copyright 2013 Intel Corporation
++ * Author: Jarkko Sakkinen <jarkko.sakkinen@intel.com>
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License
++ * as published by the Free Software Foundation; version 2
++ * of the License.
++ */
++
++#ifndef __ARCH_GSGX_H__
++#define __ARCH_GSGX_H__
++
++#include <sgx.h>
++#include <sgx_arch.h>
++#include <sgx_user.h>
++
++#include "graphene-sgx.h"
++#include "isgx_ksyms.h"
++
++extern struct vm_operations_struct gsgx_vm_ops;
++
++long gsgx_ioctl(struct file *filep, unsigned int cmd, unsigned long arg);
++
++#endif /* __ARCH_X86_GSGX_H__ */
+diff --git a/Pal/src/host/Linux-SGX/sgx-driver/gsgx_main.c b/Pal/src/host/Linux-SGX/sgx-driver/gsgx_main.c
+index fb5f3bad5..1845f6a3f 100644
+--- a/Pal/src/host/Linux-SGX/sgx-driver/gsgx_main.c
++++ b/Pal/src/host/Linux-SGX/sgx-driver/gsgx_main.c
+@@ -57,7 +57,7 @@ static long gsgx_ioctl_enclave_create(struct file *filep, unsigned int cmd,
+ 	isgx_create.src = createp->src;
+ 	filep->private_data = (void *) createp->src;
+ 
+-	ret = KSYM(isgx_ioctl_enclave_create)(filep, SGX_IOC_ENCLAVE_CREATE,
++	ret = KSYM(sgx_ioc_enclave_create)(filep, SGX_IOC_ENCLAVE_CREATE,
+ 					      (unsigned long) &isgx_create);
+ 
+ 	if (old_mmap_min_addr)
+@@ -90,7 +90,7 @@ static long gsgx_ioctl_enclave_add_pages(struct file *filep, unsigned int cmd,
+ 		isgx_add.mrmask =
+ 			addp->flags & GSGX_ENCLAVE_ADD_PAGES_SKIP_EEXTEND ?
+  		        0 : ~0;
+-		ret = KSYM(isgx_ioctl_enclave_add_page)(filep,
++		ret = KSYM(sgx_ioc_enclave_add_page)(filep,
+ 			SGX_IOC_ENCLAVE_ADD_PAGE, (unsigned long) &isgx_add);
+ 		if (ret < 0)
+ 			break;
+@@ -109,7 +109,7 @@ static long gsgx_ioctl_enclave_init(struct file *filep, unsigned int cmd,
+ 	isgx_init.sigstruct = initp->sigstruct;
+ 	isgx_init.einittoken = initp->einittoken;
+ 
+-	return KSYM(isgx_ioctl_enclave_init)(filep, SGX_IOC_ENCLAVE_INIT,
++	return KSYM(sgx_ioc_enclave_init)(filep, SGX_IOC_ENCLAVE_INIT,
+ 					     (unsigned long) &isgx_init);
+ }
+ 
+@@ -150,7 +150,7 @@ long gsgx_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
+ 
+ static int gsgx_mmap(struct file *file, struct vm_area_struct *vma)
+ {
+-	return KSYM(isgx_mmap)(file, vma);
++	return KSYM(sgx_mmap)(file, vma);
+ }
+ 
+ static unsigned long gsgx_get_unmapped_area(struct file *file,
+@@ -161,7 +161,7 @@ static unsigned long gsgx_get_unmapped_area(struct file *file,
+ {
+ 	if (file->private_data == (void *) GSGX_ENCLAVE_CREATE_NO_ADDR) {
+ 		unsigned long unmapped_addr =
+-			KSYM(isgx_get_unmapped_area)(file, addr, len,
++			KSYM(sgx_get_unmapped_area)(file, addr, len,
+ 						     pgoff, flags);
+ 		file->private_data = (void *) unmapped_addr;
+ 		return unmapped_addr;
+@@ -192,16 +192,16 @@ static struct miscdevice gsgx_dev = {
+ 	.mode	= S_IRUGO | S_IWUGO,
+ };
+ 
+-IMPORT_KSYM_PROTO(isgx_ioctl_enclave_create, long,
++IMPORT_KSYM_PROTO(sgx_ioc_enclave_create, long,
+ 	struct file *filep, unsigned int cmd, unsigned long arg);
+-IMPORT_KSYM_PROTO(isgx_ioctl_enclave_init, long,
++IMPORT_KSYM_PROTO(sgx_ioc_enclave_init, long,
+ 	struct file *filep, unsigned int cmd, unsigned long arg);
+-IMPORT_KSYM_PROTO(isgx_ioctl_enclave_add_page, long,
++IMPORT_KSYM_PROTO(sgx_ioc_enclave_add_page, long,
+ 	struct file *filep, unsigned int cmd, unsigned long arg);
+ 
+-IMPORT_KSYM(isgx_enclave_release);
+-IMPORT_KSYM_PROTO(isgx_mmap, int, struct file *, struct vm_area_struct *);
+-IMPORT_KSYM_PROTO(isgx_get_unmapped_area, unsigned long,
++IMPORT_KSYM(sgx_encl_release);
++IMPORT_KSYM_PROTO(sgx_mmap, int, struct file *, struct vm_area_struct *);
++IMPORT_KSYM_PROTO(sgx_get_unmapped_area, unsigned long,
+ 	struct file *, unsigned long, unsigned long,
+ 	unsigned long, unsigned long);
+ 
+@@ -210,17 +210,17 @@ static int gsgx_lookup_ksyms(void)
+ 	int ret;
+ 	if ((ret = LOOKUP_KSYM(dac_mmap_min_addr)))
+ 		return ret;
+-	if ((ret = LOOKUP_KSYM(isgx_ioctl_enclave_create)))
++	if ((ret = LOOKUP_KSYM(sgx_ioc_enclave_create)))
+ 		return ret;
+-	if ((ret = LOOKUP_KSYM(isgx_ioctl_enclave_init)))
++	if ((ret = LOOKUP_KSYM(sgx_ioc_enclave_init)))
+ 		return ret;
+-	if ((ret = LOOKUP_KSYM(isgx_ioctl_enclave_add_page)))
++	if ((ret = LOOKUP_KSYM(sgx_ioc_enclave_add_page)))
+ 		return ret;
+-	if ((ret = LOOKUP_KSYM(isgx_enclave_release)))
++	if ((ret = LOOKUP_KSYM(sgx_encl_release)))
+ 		return ret;
+-	if ((ret = LOOKUP_KSYM(isgx_mmap)))
++	if ((ret = LOOKUP_KSYM(sgx_mmap)))
+ 		return ret;
+-	if ((ret = LOOKUP_KSYM(isgx_get_unmapped_area)))
++	if ((ret = LOOKUP_KSYM(sgx_get_unmapped_area)))
+ 		return ret;
+ 	return 0;
+ }
+diff --git a/Pal/src/host/Linux-SGX/sgx-driver/isgx_ksyms.h b/Pal/src/host/Linux-SGX/sgx-driver/isgx_ksyms.h
+index 260043ef5..8833b3724 100644
+--- a/Pal/src/host/Linux-SGX/sgx-driver/isgx_ksyms.h
++++ b/Pal/src/host/Linux-SGX/sgx-driver/isgx_ksyms.h
+@@ -3,17 +3,17 @@
+ 
+ #include "ksyms.h"
+ 
+-extern IMPORT_KSYM_PROTO(isgx_ioctl_enclave_create, long,
++extern IMPORT_KSYM_PROTO(sgx_ioc_enclave_create, long,
+ 	struct file *filep, unsigned int cmd, unsigned long arg);
+-extern IMPORT_KSYM_PROTO(isgx_ioctl_enclave_init, long,
++extern IMPORT_KSYM_PROTO(sgx_ioc_enclave_init, long,
+ 	struct file *filep, unsigned int cmd, unsigned long arg);
+-extern IMPORT_KSYM_PROTO(isgx_ioctl_enclave_add_page, long,
++extern IMPORT_KSYM_PROTO(sgx_ioc_enclave_add_page, long,
+ 	struct file *filep, unsigned int cmd, unsigned long arg);
+ 
+-extern IMPORT_KSYM(isgx_enclave_release);
+-extern IMPORT_KSYM_PROTO(isgx_mmap, int,
++extern IMPORT_KSYM(sgx_encl_release);
++extern IMPORT_KSYM_PROTO(sgx_mmap, int,
+ 	struct file *, struct vm_area_struct *);
+-extern IMPORT_KSYM_PROTO(isgx_get_unmapped_area, unsigned long,
++extern IMPORT_KSYM_PROTO(sgx_get_unmapped_area, unsigned long,
+ 	struct file *, unsigned long, unsigned long,
+ 	unsigned long, unsigned long);
+ 
+diff --git a/Pal/src/host/Linux-SGX/sgx-driver/link-intel-driver.py b/Pal/src/host/Linux-SGX/sgx-driver/link-intel-driver.py
+index a87d5bf33..c8df624ad 100755
+--- a/Pal/src/host/Linux-SGX/sgx-driver/link-intel-driver.py
++++ b/Pal/src/host/Linux-SGX/sgx-driver/link-intel-driver.py
+@@ -12,7 +12,7 @@
+           "from https://github.com/01org/linux-sgx-driver."
+     while True:
+         isgx = raw_input('Enter the Intel sgx driver derctory: ')
+-        if os.path.exists(isgx + '/isgx.h'):
++        if os.path.exists(isgx + '/sgx.h'):
+             break
+         print '{0} is not a directory for the Intel sgx driver'.format(isgx)
+ 
+
+From 5d40319db6cd8ed715095264a35443219cf3c81d Mon Sep 17 00:00:00 2001
+From: Hui Wang <hw.huiwang@huawei.com>
+Date: Thu, 18 May 2017 17:43:34 +0800
+Subject: [PATCH 2/2] adaptive pal-sgx-get-token to intel's new sdk
+
+Intel have change the aesmd's socket from abstract unix socket
+'@sgx_aesm_socket_base' to file based socket
+'/var/run/aesmd/aesm.socket', this commit trying to adaptive
+pal-sgx-get-token to the changes.
+
+See [commit f28767](https://github.com/01org/linux-sgx/commit/f287674fef604f4a6ef8710033f6a091fe644d7a) for details.
+
+Signed-off-by: Hui Wang <hw.huiwang@huawei.com>
+---
+ Pal/src/host/Linux-SGX/signer/pal-sgx-get-token | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/Pal/src/host/Linux-SGX/signer/pal-sgx-get-token b/Pal/src/host/Linux-SGX/signer/pal-sgx-get-token
+index e72b86eff..2efba20fd 100755
+--- a/Pal/src/host/Linux-SGX/signer/pal-sgx-get-token
++++ b/Pal/src/host/Linux-SGX/signer/pal-sgx-get-token
+@@ -67,7 +67,7 @@ def connect_aesmd(attr):
+     req_msg_raw = req_msg.SerializeToString()
+ 
+     aesm_service = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+-    aesm_service.connect("\0sgx_aesm_socket_base" + "\0" * 87)
++    aesm_service.connect("/var/run/aesmd/aesm.socket")
+ 
+     aesm_service.send(struct.pack("<I", len(req_msg_raw)))
+     aesm_service.send(req_msg_raw)

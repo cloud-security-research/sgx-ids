@@ -1,0 +1,11 @@
+/graphene-snort/Runtime/
+*~
+*.token
+*.sig
+*.manifest.sgx
+*.log
+*.csv
+*.pdf
+
+graphene-snort/LibOS/shim/test/apps/libdaq/dummy
+graphene-snort/LibOS/shim/test/apps/libdaq/install_untrusted

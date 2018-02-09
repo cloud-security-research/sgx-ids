@@ -1,0 +1,146 @@
+diff --git a/src/main/thread_config.cc b/src/main/thread_config.cc
+index a3ffb14..b00af62 100644
+--- a/src/main/thread_config.cc
++++ b/src/main/thread_config.cc
+@@ -23,7 +23,11 @@
+ 
+ #include "thread_config.h"
+ 
++#define NOHWLOC  // Dmitrii Kuvaiskii on 7/21/2017: rm hwloc dependency
++
++#ifndef NOHWLOC
+ #include <hwloc.h>
++#endif
+ 
+ #include "log/messages.h"
+ #include "utils/util.h"
+@@ -32,13 +36,16 @@
+ #include "catch/catch.hpp"
+ #endif
+ 
++#ifndef NOHWLOC
+ static hwloc_topology_t topology = nullptr;
+ static hwloc_cpuset_t process_cpuset = nullptr;
+ static const struct hwloc_topology_support* topology_support = nullptr;
++#endif
+ static unsigned instance_max = 1;
+ 
+ struct CpuSet
+ {
++#ifndef NOHWLOC
+     CpuSet(hwloc_cpuset_t set) : cpuset(set) { }
+     ~CpuSet()
+     {
+@@ -47,10 +54,14 @@ struct CpuSet
+     }
+ 
+     hwloc_cpuset_t cpuset;
++#else
++    char dummy;
++#endif
+ };
+ 
+ bool ThreadConfig::init()
+ {
++#ifndef NOHWLOC
+     if (hwloc_topology_init(&topology))
+         return false;
+     if (hwloc_topology_load(topology))
+@@ -66,6 +77,7 @@ bool ThreadConfig::init()
+     }
+     else
+         process_cpuset = hwloc_bitmap_dup(hwloc_topology_get_allowed_cpuset(topology));
++#endif
+     return true;
+ }
+ 
+@@ -75,9 +87,11 @@ void ThreadConfig::set_instance_max(unsigned max)
+         instance_max = max;
+     else
+     {
++#ifndef NOHWLOC
+         /* A max of 0 indicates automatic allocation.  Set the instance max to the total number of
+             CPUs in the our process's running cpuset. */
+         instance_max = hwloc_bitmap_weight(process_cpuset);
++#endif
+     }
+ }
+ 
+@@ -88,6 +102,7 @@ unsigned ThreadConfig::get_instance_max()
+ 
+ CpuSet* ThreadConfig::validate_cpuset_string(const char* cpuset_str)
+ {
++#ifndef NOHWLOC
+     hwloc_bitmap_t cpuset = hwloc_bitmap_alloc();
+     if (hwloc_bitmap_list_sscanf(cpuset, cpuset_str) ||
+             !hwloc_bitmap_isincluded(cpuset, process_cpuset))
+@@ -96,6 +111,9 @@ CpuSet* ThreadConfig::validate_cpuset_string(const char* cpuset_str)
+         return nullptr;
+     }
+     return new CpuSet(cpuset);
++#else
++    return nullptr;
++#endif
+ }
+ 
+ void ThreadConfig::destroy_cpuset(CpuSet *cpuset)
+@@ -105,6 +123,7 @@ void ThreadConfig::destroy_cpuset(CpuSet *cpuset)
+ 
+ void ThreadConfig::term()
+ {
++#ifndef NOHWLOC
+     if (topology)
+     {
+         hwloc_topology_destroy(topology);
+@@ -116,6 +135,7 @@ void ThreadConfig::term()
+         process_cpuset = nullptr;
+     }
+     topology_support = nullptr;
++#endif
+ }
+ 
+ ThreadConfig::~ThreadConfig()
+@@ -126,6 +146,7 @@ ThreadConfig::~ThreadConfig()
+ 
+ void ThreadConfig::set_thread_affinity(SThreadType type, unsigned id, CpuSet* cpuset)
+ {
++#ifndef NOHWLOC
+     if (topology_support->cpubind->set_thisthread_cpubind)
+     {
+         TypeIdPair key { type, id };
+@@ -137,10 +158,12 @@ void ThreadConfig::set_thread_affinity(SThreadType type, unsigned id, CpuSet* cp
+     }
+     else
+         ParseWarning(WARN_CONF, "This platform does not support setting thread affinity.\n");
++#endif
+ }
+ 
+ void ThreadConfig::implement_thread_affinity(SThreadType type, unsigned id)
+ {
++#ifndef NOHWLOC
+     if (!topology_support->cpubind->set_thisthread_cpubind)
+         return;
+ 
+@@ -168,6 +191,7 @@ void ThreadConfig::implement_thread_affinity(SThreadType type, unsigned id)
+     }
+ 
+     free(s);
++#endif
+ }
+ 
+ 
+@@ -183,6 +207,7 @@ TEST_CASE("Parse cpuset string negative test", "[ThreadConfig]")
+     CHECK(cpuset == nullptr);
+ }
+ 
++#ifndef NOHWLOC
+ TEST_CASE("Parse cpuset string positive test", "[ThreadConfig]")
+ {
+     char* s;
+@@ -227,5 +252,6 @@ TEST_CASE("Set and implement thread affinity", "[ThreadConfig]")
+         hwloc_bitmap_free(thread_cpuset);
+     }
+ }
++#endif
+ 
+ #endif

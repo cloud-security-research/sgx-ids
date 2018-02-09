@@ -1,0 +1,9 @@
+Snort Intrusion Detection System with Intel SGX
+Copyright 2018 Intel(R) Corporation
+
+Portion of this software were developed at Intel Labs (https://www.intel.com/intellabs)
+This software is a research proof of concept to demonstrate the use of SGX for 
+protecting unmodified version of snort intrusion detection system. 
+
+This software not intended for production use.
+

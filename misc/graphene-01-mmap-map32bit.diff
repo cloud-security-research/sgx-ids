@@ -1,0 +1,80 @@
+diff --git a/graphene-snort/LibOS/shim/src/sys/shim_mmap.c b/graphene-snort/LibOS/shim/src/sys/shim_mmap.c
+index 1d68a93..eac5a14 100644
+--- a/graphene-snort/LibOS/shim/src/sys/shim_mmap.c
++++ b/graphene-snort/LibOS/shim/src/sys/shim_mmap.c
+@@ -51,8 +51,10 @@ void * shim_do_mmap (void * addr, size_t length, int prot, int flags, int fd,
+ 
+     assert(!(flags & (VMA_UNMAPPED|VMA_TAINTED)));
+ 
++// BUGFIX Dmitrii Kuvaiskii: at least LuaJIT requires MAP_32BIT flag,
++//                           so silently ignore it
+     if (flags & MAP_32BIT)
+-        return (void *) -ENOSYS;
++        flags &= ~MAP_32BIT;
+ 
+     int pal_alloc_type = 0;
+ 
+diff --git a/graphene-snort/LibOS/shim/test/apps/test-map32bit/Makefile b/graphene-snort/LibOS/shim/test/apps/test-map32bit/Makefile
+new file mode 100644
+index 0000000..c619f6c
+--- /dev/null
++++ b/graphene-snort/LibOS/shim/test/apps/test-map32bit/Makefile
+@@ -0,0 +1,15 @@
++target = testmap32bit
++exec_target = testmap32bit.manifest
++
++clean-extra += clean-tmp
++
++level = ../../
++include ../../Makefile
++
++$(target): %: %.c
++	@echo [ $@ ]
++	@$(CC) $(CFLAGS) -pthread -o $@ $< \
++	$(shell echo $@ | sed 's/^[^\.]*//g' | sed 's/\./ -l/g')
++
++clean-tmp:
++	rm -f $(target).manifest.sgx
+diff --git a/graphene-snort/LibOS/shim/test/apps/test-map32bit/testmap32bit.c b/graphene-snort/LibOS/shim/test/apps/test-map32bit/testmap32bit.c
+new file mode 100644
+index 0000000..4f87fb3
+--- /dev/null
++++ b/graphene-snort/LibOS/shim/test/apps/test-map32bit/testmap32bit.c
+@@ -0,0 +1,10 @@
++#include <unistd.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <sys/mman.h>
++
++int main(int argc, char** argv) {
++    void *ptr = mmap(NULL, 0x1000, PROT_READ|PROT_WRITE, MAP_32BIT|MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
++    printf("created ptr = %p\n", ptr);
++    exit(0);
++}
+diff --git a/graphene-snort/LibOS/shim/test/apps/test-map32bit/testmap32bit.manifest.template b/graphene-snort/LibOS/shim/test/apps/test-map32bit/testmap32bit.manifest.template
+new file mode 100644
+index 0000000..3558bc3
+--- /dev/null
++++ b/graphene-snort/LibOS/shim/test/apps/test-map32bit/testmap32bit.manifest.template
+@@ -0,0 +1,21 @@
++#!$(PAL)
++
++loader.preload = file:$(SHIMPATH)
++loader.exec = file:testmap32bit
++loader.env.LD_LIBRARY_PATH = /lib:/usr/lib:/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu
++loader.debug_type = none
++
++fs.mount.lib.type = chroot
++fs.mount.lib.path = /lib
++fs.mount.lib.uri = file:$(LIBCDIR)
++
++sys.stack.size = 1m
++sys.brk.size = 64M
++glibc.heap_size = 16M
++
++sgx.trusted_files.ld = file:$(LIBCDIR)/ld-linux-x86-64.so.2
++sgx.trusted_files.libc = file:$(LIBCDIR)/libc.so.6
++sgx.trusted_files.libdl = file:$(LIBCDIR)/libdl.so.2
++sgx.trusted_files.libm = file:$(LIBCDIR)/libm.so.6
++sgx.trusted_files.libpthread = file:$(LIBCDIR)/libpthread.so.0
++
